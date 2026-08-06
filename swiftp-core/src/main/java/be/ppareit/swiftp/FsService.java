@@ -20,7 +20,11 @@ along with SwiFTP.  If not, see <http://www.gnu.org/licenses/>.
 
 package be.ppareit.swiftp;
 
+import android.Manifest;
 import android.app.AlarmManager;
+import android.app.Notification;
+import android.app.NotificationChannel;
+import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
@@ -44,7 +48,9 @@ import android.util.Log;
 import android.view.Gravity;
 import android.widget.Toast;
 
+import androidx.annotation.RequiresPermission;
 import androidx.core.content.ContextCompat;
+import androidx.core.app.NotificationCompat;
 
 import net.vrallev.android.cat.Cat;
 
@@ -62,12 +68,30 @@ import java.util.List;
 
 import javax.net.ssl.SSLServerSocket;
 
-import be.ppareit.swiftp.gui.FsNotification;
+
 import be.ppareit.swiftp.server.SessionThread;
 import be.ppareit.swiftp.server.TcpListener;
 import be.ppareit.swiftp.utils.FTPSSockets;
 
 public class FsService extends Service implements Runnable {
+    private static final int NOTIFICATION_ID = 1;
+    private static final String CHANNEL_ID = "swiftp_channel";
+
+    private Notification buildNotification() {
+        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (Build.VERSION.SDK_INT >= 26) {
+            NotificationChannel channel = new NotificationChannel(
+                    CHANNEL_ID, "SwiFTP", NotificationManager.IMPORTANCE_LOW);
+            nm.createNotificationChannel(channel);
+        }
+        return new NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle("SwiFTP")
+                .setContentText("FTP server running")
+                .setSmallIcon(android.R.drawable.ic_menu_upload) // swap for your own icon
+                .setOngoing(true)
+                .build();
+    }
+
     private static final String TAG = FsService.class.getSimpleName();
 
     // Service will check following actions when started through intent
@@ -164,9 +188,9 @@ public class FsService extends Service implements Runnable {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(FsNotification.NOTIFICATION_ID, FsNotification.setupNotification(getApplicationContext()), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
+            startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
         } else {
-            startForeground(FsNotification.NOTIFICATION_ID, FsNotification.setupNotification(getApplicationContext()));
+            startForeground(NOTIFICATION_ID, buildNotification());
         }
 
         //https://developer.android.com/reference/android/app/Service.html
@@ -275,6 +299,7 @@ public class FsService extends Service implements Runnable {
         listenSocket.bind(new InetSocketAddress(FsSettings.getPortNumber()));
     }
 
+    @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
     @Override
     public void run() {
         Log.d(TAG, "Server thread running");
@@ -438,6 +463,7 @@ public class FsService extends Service implements Runnable {
      *
      * @return local ip address or null if not found
      */
+    @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
     public static InetAddress getLocalInetAddress() {
         InetAddress returnAddress = null;
         if (!isConnectedToLocalNetwork()) {
@@ -473,6 +499,7 @@ public class FsService extends Service implements Runnable {
      *
      * @return true if connected to a local network
      */
+    @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
     public static boolean isConnectedToLocalNetwork() {
         boolean connected = false;
         Context context = App.getAppContext();

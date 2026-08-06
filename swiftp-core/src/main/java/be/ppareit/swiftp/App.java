@@ -18,21 +18,21 @@ along with SwiFTP.  If not, see <http://www.gnu.org/licenses/>.
 */
 package be.ppareit.swiftp;
 
+import android.annotation.SuppressLint;
 import android.app.Application;
 import android.content.Context;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.os.Build;
-
 import net.vrallev.android.cat.Cat;
 
-import be.ppareit.swiftp.gui.FsWidgetProvider;
 
 public class App extends Application {
 
     private static App mInstance;
 
+    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     @Override
     public void onCreate() {
         super.onCreate();
@@ -45,10 +45,10 @@ public class App extends Application {
 
         if (Build.VERSION.SDK_INT >= 33) {
             registerReceiver(new NsdService.ServerActionsReceiver(), intentFilter, FsService.RECEIVER_EXPORTED);
-            registerReceiver(new FsWidgetProvider(), intentFilter, FsService.RECEIVER_EXPORTED);
+            // deleted: registerReceiver(new FsWidgetProvider(), intentFilter, FsService.RECEIVER_EXPORTED);
         } else {
             registerReceiver(new NsdService.ServerActionsReceiver(), intentFilter);
-            registerReceiver(new FsWidgetProvider(), intentFilter);
+            // deleted: registerReceiver(new FsWidgetProvider(), intentFilter);
         }
     }
 

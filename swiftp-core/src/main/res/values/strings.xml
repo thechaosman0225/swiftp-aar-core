@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="nsd_servername_postfix"> FTP Server</string>
+    <string name="storage_warning">Storage location is not accessible</string>
+    <string name="username_default">swiftp</string>
+    <string name="password_default">swiftp</string>
+    <string name="portnumber_default_implicit">990</string>
+    <string name="portnumber_default_pasv_low">1024</string>
+    <string name="portnumber_default_pasv_high">1050</string>
+    <string name="bs_low">Low</string>
+    <string name="bs_high">High</string>
+    <string name="bs_deep">Deep</string>
+</resources>
