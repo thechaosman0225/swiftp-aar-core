@@ -463,7 +463,7 @@ public class FsService extends Service implements Runnable {
      *
      * @return local ip address or null if not found
      */
-    @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
+    @RequiresPermission(android.Manifest.permission.ACCESS_NETWORK_STATE)
     public static InetAddress getLocalInetAddress() {
         InetAddress returnAddress = null;
         if (!isConnectedToLocalNetwork()) {
@@ -499,7 +499,7 @@ public class FsService extends Service implements Runnable {
      *
      * @return true if connected to a local network
      */
-    @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
+    @RequiresPermission(android.Manifest.permission.ACCESS_NETWORK_STATE)
     public static boolean isConnectedToLocalNetwork() {
         boolean connected = false;
         Context context = App.getAppContext();
