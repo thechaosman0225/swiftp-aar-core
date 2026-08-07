@@ -3,10 +3,18 @@ name: Build SwiFTP Core AAR
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: build-aar
+  cancel-in-progress: true
+
 jobs:
   build-aar:
     name: Build SwiFTP Core AAR
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository
@@ -22,11 +30,6 @@ jobs:
       - name: Grant Gradle execute permission
         run: chmod +x gradlew
 
-      - name: Show swiftp-core module
-        run: |
-          echo "===== swiftp-core ====="
-          ls -R swiftp-core
-
       - name: Build Release AAR
         run: ./gradlew :swiftp-core:assembleRelease --stacktrace
 
@@ -34,7 +37,6 @@ jobs:
         run: |
           mkdir -p aar-output
           cp swiftp-core/build/outputs/aar/swiftp-core-release.aar aar-output/swiftp.aar
-
           echo "Generated AAR:"
           ls -lh aar-output
 
