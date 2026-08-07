@@ -56,6 +56,7 @@ public class App extends Application {
      * @return the Context of this application
      */
     public static Context getAppContext() {
+        if (instance == null) return null;
         return mInstance.getApplicationContext();
     }
 
