@@ -55,6 +55,7 @@ android {
 
     lint {
         disable += "GoogleAppIndexingWarning"
+        disable += "MissingPermission"
     }
 }
 
