@@ -70,7 +70,7 @@ public abstract class FtpCmd implements Runnable {
             CmdPWD.class, CmdQUIT.class, CmdRETR.class, CmdSIZE.class, CmdTYPE.class, //
             CmdCDUP.class, CmdNOOP.class, CmdSYST.class, CmdPORT.class, //
             CmdMLST.class, CmdMLSD.class, CmdHASH.class, CmdRANG.class, CmdAUTH.class, //
-            CmdPROT.class, CmdPBSZ.class, //
+            CmdPROT.class, CmdPBSZ.class, CmdFEAT.class, //
             CmdMLST.class, CmdMLSD.class, CmdHASH.class, CmdRANG.class, //
             CmdEPRT.class, CmdEPSV.class //
     };
@@ -143,7 +143,9 @@ public abstract class FtpCmd implements Runnable {
         final boolean socketNotEncrypted = session.getIsPlainSocket();
         if (forceAUTHTLS && socketNotEncrypted) {
             // When enabled, client has to use AUTH command and make the connection encrypted.
-            if (cmdInstance.getClass().equals(CmdAUTH.class)) cmdInstance.run();
+            // FEAT is how the client finds out that AUTH is what we are waiting for
+            if (cmdInstance.getClass().equals(CmdAUTH.class)
+                    || cmdInstance.getClass().equals(CmdFEAT.class)) cmdInstance.run();
             else session.writeString("530 Login first with AUTH, or QUIT\r\n");
             return;
         }
@@ -166,6 +168,9 @@ public abstract class FtpCmd implements Runnable {
         } else if (cmdInstance.getClass().equals(CmdUSER.class)
                 || cmdInstance.getClass().equals(CmdPASS.class)
                 || cmdInstance.getClass().equals(CmdQUIT.class)
+                // RFC 2389 section 3: FEAT has to be answerable before login, otherwise
+                // a client cannot know whether AUTH TLS is on offer
+                || cmdInstance.getClass().equals(CmdFEAT.class)
                 || cmdInstance.getClass().equals(CmdAUTH.class)
                 || cmdInstance.getClass().equals(CmdPROT.class)
                 || cmdInstance.getClass().equals(CmdPBSZ.class)
@@ -228,6 +233,38 @@ public abstract class FtpCmd implements Runnable {
         return new File(existingPrefix, param);
     }
 
+    /**
+     * True when the path is the chroot itself, or something below it.
+     */
+    private static boolean isWithinChroot(String canonicalChroot, String canonicalPath) {
+        if (canonicalPath.equals(canonicalChroot)) {
+            return true;
+        }
+        if (canonicalChroot.endsWith(File.separator)) {
+            // the filesystem root, which already carries its separator
+            return canonicalPath.startsWith(canonicalChroot);
+        }
+        // the separator has to take part: a bare startsWith accepts every sibling whose
+        // name merely begins with the chroot's, eg /sdcard/Sharefolder for /sdcard/Share
+        return canonicalPath.startsWith(canonicalChroot + File.separator);
+    }
+
+    /**
+     * The path as the client should see it, rooted at the chroot, or null when the path
+     * lies outside the chroot and there is nothing sensible to report.
+     */
+    static String chrootRelativePath(String canonicalChroot, String canonicalPath) {
+        if (!isWithinChroot(canonicalChroot, canonicalPath)) {
+            return null;
+        }
+        // the filesystem root carries a separator that the visible path has to keep
+        int prefix = canonicalChroot.endsWith(File.separator)
+                ? canonicalChroot.length() - 1
+                : canonicalChroot.length();
+        String relative = canonicalPath.substring(prefix);
+        return relative.isEmpty() ? File.separator : relative;
+    }
+
     public boolean violatesChroot(File file) {
         try {
             // taking the canonical path as new devices have sdcard symbolic linked
@@ -235,11 +272,11 @@ public abstract class FtpCmd implements Runnable {
             File chroot = sessionThread.getChrootDir();
             String canonicalChroot = chroot.getCanonicalPath();
             String canonicalPath = file.getCanonicalPath();
-            if (!canonicalPath.startsWith(canonicalChroot)) {
+            if (!isWithinChroot(canonicalChroot, canonicalPath)) {
                 Log.i(TAG, "Path violated folder restriction, denying");
                 Log.d(TAG, "path: " + canonicalPath);
                 Log.d(TAG, "chroot: " + chroot.toString());
-                return true; // the path must begin with the chroot path
+                return true; // the path must be the chroot or below it
             }
             return false;
         } catch (Exception e) {
@@ -255,11 +292,11 @@ public abstract class FtpCmd implements Runnable {
             File chroot = sessionThread.getChrootDir();
             String canonicalChroot = chroot.getCanonicalPath();
             String canonicalPath = FileUtil.getFileTypePathFromDocumentFile(file);
-            if (!canonicalPath.startsWith(canonicalChroot)) {
+            if (!isWithinChroot(canonicalChroot, canonicalPath)) {
                 Log.i(TAG, "Path violated folder restriction, denying");
                 Log.d(TAG, "path: " + canonicalPath);
                 Log.d(TAG, "chroot: " + chroot.toString());
-                return true; // the path must begin with the chroot path
+                return true; // the path must be the chroot or below it
             }
             return false;
         } catch (Exception e) {

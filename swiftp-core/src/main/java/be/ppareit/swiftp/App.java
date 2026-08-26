@@ -18,45 +18,51 @@ along with SwiFTP.  If not, see <http://www.gnu.org/licenses/>.
 */
 package be.ppareit.swiftp;
 
-import android.annotation.SuppressLint;
 import android.app.Application;
 import android.content.Context;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
-import android.os.Build;
+
+import androidx.appcompat.app.AppCompatDelegate;
+import androidx.core.content.ContextCompat;
+
 import net.vrallev.android.cat.Cat;
 
+import be.ppareit.swiftp.gui.QuickToggleShortcut;
+import be.ppareit.swiftp.tasker.ServerStateBroadcastReceiver;
 
 public class App extends Application {
 
     private static App mInstance;
 
-    @SuppressLint("UnspecifiedRegisterReceiverFlag")
     @Override
     public void onCreate() {
         super.onCreate();
         mInstance = this;
+
+        AppCompatDelegate.setDefaultNightMode(AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM);
 
         IntentFilter intentFilter = new IntentFilter();
         intentFilter.addAction(FsService.ACTION_STARTED);
         intentFilter.addAction(FsService.ACTION_STOPPED);
         intentFilter.addAction(FsService.ACTION_FAILEDTOSTART);
 
-        if (Build.VERSION.SDK_INT >= 33) {
-            registerReceiver(new NsdService.ServerActionsReceiver(), intentFilter, FsService.RECEIVER_EXPORTED);
-            // deleted: registerReceiver(new FsWidgetProvider(), intentFilter, FsService.RECEIVER_EXPORTED);
-        } else {
-            registerReceiver(new NsdService.ServerActionsReceiver(), intentFilter);
-            // deleted: registerReceiver(new FsWidgetProvider(), intentFilter);
-        }
+        // stuck on ContextCompat till API >= 33 because RECEIVER_NOT_EXPORTED
+        ContextCompat.registerReceiver(this, new NsdService.ServerActionsReceiver(),
+                intentFilter, ContextCompat.RECEIVER_NOT_EXPORTED);
+        ContextCompat.registerReceiver(this, new ServerStateBroadcastReceiver(),
+                intentFilter, ContextCompat.RECEIVER_NOT_EXPORTED);
+        ContextCompat.registerReceiver(this, new QuickToggleShortcut(),
+                intentFilter, ContextCompat.RECEIVER_NOT_EXPORTED);
+
+        QuickToggleShortcut.update(this, FsService.isRunning());
     }
 
     /**
      * @return the Context of this application
      */
     public static Context getAppContext() {
-        if (mInstance == null) return null;
         return mInstance.getApplicationContext();
     }
 

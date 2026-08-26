@@ -1,15 +1,12 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+
 package be.ppareit.swiftp.utils;
 
-import android.annotation.TargetApi;
-import android.content.ContentResolver;
-import android.content.ContentValues;
 import android.content.Context;
 import android.content.UriPermission;
 import android.net.Uri;
-import android.os.Build;
 import android.os.ParcelFileDescriptor;
 import android.provider.DocumentsContract;
-import android.provider.MediaStore;
 import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
 import androidx.documentfile.provider.DocumentFile;
@@ -36,7 +33,7 @@ public abstract class FileUtil {
     private static final String LOG = "FileUtil";
 
     /**
-     * Copy a file. The target file may even be on external SD card for Kitkat.
+     * Copy a file. The target file may even be on external SD card.
      *
      * @param source The source file
      * @param target The target file
@@ -59,22 +56,11 @@ public abstract class FileUtil {
                 outChannel = ((FileOutputStream) outStream).getChannel();
                 inChannel.transferTo(0, inChannel.size(), outChannel);
             } else {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                    // Storage Access Framework
-                    DocumentFile targetDocument = getDocumentFile(target, false, context);
-                    outStream =
-                            context.getContentResolver().openOutputStream(targetDocument.getUri());
-                } else if (Build.VERSION.SDK_INT == Build.VERSION_CODES.KITKAT) {
-                    // Workaround for Kitkat ext SD card
-
-                    Uri uri = MediaStoreHack.getUriFromFile(target.getAbsolutePath(), context);
-                    outStream = context.getContentResolver().openOutputStream(uri);
-                } else {
-                    return false;
-                }
+                // Storage Access Framework
+                DocumentFile targetDocument = getDocumentFile(target, false, context);
+                outStream = context.getContentResolver().openOutputStream(targetDocument.getUri());
 
                 if (outStream != null) {
-                    // Both for SAF and for Kitkat, write to output stream.
                     byte[] buffer = new byte[16384]; // MAGIC_NUMBER
                     int bytesRead;
                     while ((bytesRead = inStream.read(buffer)) != -1) {
@@ -122,15 +108,10 @@ public abstract class FileUtil {
             // standard way
             outStream = new FileOutputStream(target);
         } else {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                // Storage Access Framework
-                DocumentFile targetDocument = getDocumentFile(target, false, context);
-                outStream = new ParcelFileDescriptor.AutoCloseOutputStream(context.getContentResolver()
-                        .openFileDescriptor(targetDocument.getUri(), "rw"));
-            } else if (Build.VERSION.SDK_INT == Build.VERSION_CODES.KITKAT) {
-                // Workaround for Kitkat ext SD card
-                return MediaStoreHack.getOutputStream(context, target.getPath());
-            }
+            // Storage Access Framework
+            DocumentFile targetDocument = getDocumentFile(target, false, context);
+            outStream = new ParcelFileDescriptor.AutoCloseOutputStream(context.getContentResolver()
+                    .openFileDescriptor(targetDocument.getUri(), "rw"));
         }
         return outStream;
     }
@@ -161,26 +142,12 @@ public abstract class FileUtil {
             return true;
 
         // Try with Storage Access Framework.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && FileUtil.isOnExtSdCard(file, context)) {
+        if (FileUtil.isOnExtSdCard(file, context)) {
             DocumentFile document = getDocumentFile(file, false, context);
             if (document == null) {
                 return false;
             }
             return document.delete();
-        }
-
-        // Try the Kitkat workaround.
-        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.KITKAT) {
-            ContentResolver resolver = context.getContentResolver();
-
-            try {
-                Uri uri = MediaStoreHack.getUriFromFile(file.getAbsolutePath(), context);
-                resolver.delete(uri, null, null);
-                return !file.exists();
-            } catch (Exception e) {
-                Log.e(LOG, "Error when deleting file " + file.getAbsolutePath(), e);
-                return false;
-            }
         }
 
         return !file.exists();
@@ -226,8 +193,7 @@ public abstract class FileUtil {
         }
 
         // Try the Storage Access Framework if it is just a rename within the same parent folder.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP
-                && source.getParent().equals(target.getParent()) && FileUtil.isOnExtSdCard(source, context)) {
+        if (source.getParent().equals(target.getParent()) && FileUtil.isOnExtSdCard(source, context)) {
             DocumentFile document = getDocumentFile(source, false, context);
             if (document == null) {
                 return false;
@@ -250,7 +216,7 @@ public abstract class FileUtil {
     }
 
     /**
-     * Rename a folder. In case of extSdCard in Kitkat, the old folder stays in place, but files are moved.
+     * Rename a folder. On an extSdCard the old folder stays in place, but files are moved.
      *
      * @param source The source folder.
      * @param target The target folder.
@@ -284,8 +250,7 @@ public abstract class FileUtil {
         }
 
         // Try the Storage Access Framework if it is just a rename within the same parent folder.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP
-                && source.getParent().equals(target.getParent()) && FileUtil.isOnExtSdCard(source, context)) {
+        if (source.getParent().equals(target.getParent()) && FileUtil.isOnExtSdCard(source, context)) {
             DocumentFile document = getDocumentFile(source, true, context);
             if (document == null) {
                 return false;
@@ -330,7 +295,7 @@ public abstract class FileUtil {
     }
 
     /**
-     * Create a folder. The folder may even be on external SD card for Kitkat.
+     * Create a folder. The folder may even be on external SD card.
      *
      * @param file The folder to be created.
      * @return True if creation was successful.
@@ -367,7 +332,7 @@ public abstract class FileUtil {
             return true;
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && (FileUtil.isOnExtSdCard(file, context))) {
+        if (FileUtil.isOnExtSdCard(file, context)) {
             // Try with Storage Access Framework.
             DocumentFile document = getDocumentFile(file, true, context);
             if (document == null) {
@@ -375,15 +340,6 @@ public abstract class FileUtil {
             }
             // getDocumentFile implicitly creates the directory.
             return document.exists();
-        }
-
-        // Try the Kitkat workaround.
-        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.KITKAT) {
-            try {
-                return MediaStoreHack.mkdir(context, file);
-            } catch (IOException e) {
-                return false;
-            }
         }
 
         return false;
@@ -413,7 +369,7 @@ public abstract class FileUtil {
         }
 
         // Try with Storage Access Framework.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && FileUtil.isOnExtSdCard(file, context)) {
+        if (FileUtil.isOnExtSdCard(file, context)) {
             DocumentFile document = getDocumentFile(file.getParentFile(), true, context);
             if (document == null) {
                 return false;
@@ -429,13 +385,6 @@ public abstract class FileUtil {
             }
         }
 
-        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.KITKAT) {
-            try {
-                return MediaStoreHack.mkfile(context, file);
-            } catch (Exception e) {
-                return false;
-            }
-        }
         return false;
     }
 
@@ -478,23 +427,9 @@ public abstract class FileUtil {
         }
 
         // Try with Storage Access Framework.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            DocumentFile document = getDocumentFile(file, true, context);
-            if (document != null && document.delete()) {
-                return true;
-            }
-        }
-
-        // Try the Kitkat workaround.
-        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.KITKAT) {
-            ContentResolver resolver = context.getContentResolver();
-            ContentValues values = new ContentValues();
-            values.put(MediaStore.MediaColumns.DATA, file.getAbsolutePath());
-            resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
-
-            // Delete the created entry, such that content provider will delete the file.
-            resolver.delete(MediaStore.Files.getContentUri("external"), MediaStore.MediaColumns.DATA + "=?",
-                    new String[]{file.getAbsolutePath()});
+        DocumentFile document = getDocumentFile(file, true, context);
+        if (document != null && document.delete()) {
+            return true;
         }
 
         return !file.exists();
@@ -598,11 +533,10 @@ public abstract class FileUtil {
     }
 
     /**
-     * Get a list of external SD card paths. (Kitkat or higher.)
+     * Get a list of external SD card paths.
      *
      * @return A list of external SD card paths.
      */
-    @TargetApi(Build.VERSION_CODES.KITKAT)
     private static String[] getExtSdCardPaths(Context context) {
         List<String> paths = new ArrayList<>();
         for (File file : context.getExternalFilesDirs("external")) {
@@ -625,7 +559,6 @@ public abstract class FileUtil {
         return paths.toArray(new String[0]);
     }
 
-    @TargetApi(Build.VERSION_CODES.KITKAT)
     public static String[] getExtSdCardPathsForActivity(Context context) {
         List<String> paths = new ArrayList<>();
         for (File file : context.getExternalFilesDirs("external")) {
@@ -655,7 +588,6 @@ public abstract class FileUtil {
      * @return The main folder of the external SD card containing this file, if the file is on an SD card. Otherwise,
      * null is returned.
      */
-    @TargetApi(Build.VERSION_CODES.KITKAT)
     private static String getExtSdCardFolder(final FileUtil.Gen file, Context context) {
         boolean isDocFile = file.getOb() instanceof DocumentFile; // double check
         if (Util.useScopedStorage() && isDocFile) {
@@ -691,45 +623,30 @@ public abstract class FileUtil {
      * Used to get eg "/storage" since URIs for whatever reasons omit this.
      * */
     public static String getSdCardBaseFolderScopedStorage() {
+        final String name = getSdCardNameScopedStorage();
+        if (name == null) return null;
         final File[] f = ContextCompat.getExternalFilesDirs(App.getAppContext(), null);
-        String path = null;
         for (File each : f) {
             final String eachPath = each.getPath();
-            final Uri uri = FileUtil.getTreeUri();
-            if (uri == null) return null;
-            String s = cleanupUriStoragePath(uri);
-            try {
-                // Only want the sd card folder
-                if (s != null) s = s.substring(0, s.indexOf(File.pathSeparator));
-            } catch (Exception e) {
-                return null;
-            }
-            if (s != null) {
-                if (eachPath.contains(s)) {
-                    // Found the sd card path eg "/storage/[sd card]/Temp" should return as "/storage"
-                    // as the DocumentFile Uri will contain the [sd card] all the way to the picked folder.
-                    path = eachPath.substring(0, eachPath.indexOf(s) - 1);
-                }
+            if (eachPath.contains(name)) {
+                // Found the sd card path eg "/storage/[sd card]/Temp" should return as "/storage"
+                // as the DocumentFile Uri will contain the [sd card] all the way to the picked folder.
+                return eachPath.substring(0, eachPath.indexOf(name) - 1);
             }
         }
-        return path;
+        return null;
     }
 
     /*
-     * Obtains only the sd card folder name or null if sd card is not being used
-     * */
+     * Obtains only the sd card folder name or null if sd card is not being used.
+     */
     public static String getSdCardNameScopedStorage() {
-        final Uri uri = FileUtil.getTreeUri();
-        if (uri == null) return null;
-        String s = cleanupUriStoragePath(uri);
-        if (s.contains("primary:")) return null; // It is definitely not on the sd card.
-        try {
-            // Only want the sd card folder name
-            s = s.substring(0, s.indexOf(File.pathSeparator));
-            return s;
-        } catch (Exception e) {
-            return null;
+        for (StorageTree tree : AllowedFolders.all()) {
+            final String documentId = tree.getDocumentId();
+            final String volume = documentId.substring(0, documentId.indexOf(File.pathSeparator));
+            if (!"primary".equals(volume)) return volume;
         }
+        return null;
     }
 
     private static String getExtSdCardFolderOld(final FileUtil.Gen file, Context context) {
@@ -747,12 +664,11 @@ public abstract class FileUtil {
     }
 
     /**
-     * Determine if a file is on external sd card. (Kitkat or higher.)
+     * Determine if a file is on external sd card.
      *
      * @param file The file.
      * @return true if on external sd card.
      */
-    @TargetApi(Build.VERSION_CODES.KITKAT)
     public static boolean isOnExtSdCard(final File file, Context c) {
         return getExtSdCardFolder(new Gen<>(file), c) != null;
     }
@@ -765,7 +681,6 @@ public abstract class FileUtil {
      * @param isDirectory flag indicating if the file should be a directory.
      * @return The DocumentFile
      */
-    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
     public static DocumentFile getDocumentFile(final File file, final boolean isDirectory, Context context) {
         String baseFolder = getExtSdCardFolder(new Gen<>(file), context);
         boolean originalDirectory = false;
@@ -839,7 +754,7 @@ public abstract class FileUtil {
         return null;
     }
 
-    // Utility methods for Kitkat
+    // Utility methods for external SD card access
 
     /**
      * Checks whether the target path exists or is writable
@@ -852,7 +767,7 @@ public abstract class FileUtil {
         if (f == null) return 0;
 
         File folder = new File(f);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && FileUtil.isOnExtSdCard(folder, context)) {
+        if (FileUtil.isOnExtSdCard(folder, context)) {
             if (!folder.exists() || !folder.isDirectory()) {
                 return 0;
             }
@@ -862,9 +777,6 @@ public abstract class FileUtil {
                 return 1;
 
             }
-        } else if (Build.VERSION.SDK_INT == 19 && FileUtil.isOnExtSdCard(folder, context)) {
-            // Assume that Kitkat workaround works
-            return 1;
         } else if (folder.canWrite()) {
             return 1;
         } else {
@@ -874,58 +786,27 @@ public abstract class FileUtil {
     }
 
     /*
-     * Retrieves the URI assigned to a user upon connection that is required to use scoped storage
-     * and get the correct URI to work with.
-     * */
-    public static Uri getTreeUri() {
-        String threadName = Thread.currentThread().getName();
-        String userUriString = SessionThread.getUriString(threadName);
-        if (userUriString == null || userUriString.isEmpty()) return null;
-        List<UriPermission> list = App.getAppContext().getContentResolver().getPersistedUriPermissions();
-        if (list.size() > 0 && list.get(0) != null) {
-            for (UriPermission perm : list) {
-                String uriString = perm.getUri().getPath();
-                if (uriString == null) continue;
-                if (uriString.equals(userUriString)) {
-                    return perm.getUri();
-                }
-            }
-        }
-        return null;
-    }
-
-    /*
-     * HUGE performance improvement over DocumentFile.findFile().
-     * Use at least until Google fixes DocumentFile.findFile() performance (should it ever happen).
+     * Resolves a path, or a raw SAF document id, against the folders the user has allowed.
      */
     public static DocumentFile getDocumentFile(String filename) {
-        final Uri uri = getTreeUri();
-        if (uri == null) return null;
-        final String uriString = uri.getPath();
-        if (uriString == null) return null;
-        final String s = filename.contains(File.pathSeparator)
-                ? filename
-                : convertFilePathToUriString(uriString, filename);
-        if (s == null) return null;
-        final Uri finalUri = DocumentsContract.buildDocumentUriUsingTree(uri, s);
-        return getDocumentFileFromUri(finalUri);
-    }
+        if (filename == null) return null;
+        final StorageTreeIndex index = AllowedFolders.index();
 
-    /*
-    * Helper method to switch File path type to uriString.
-    * */
-    private static String convertFilePathToUriString(String mTree, String oldPath) {
-
-        String tree = mTree.contains("/tree/") ? mTree.replaceFirst("/tree/", "") : mTree;
-        if (tree.contains("primary:")) tree = tree.replaceFirst("primary:", "/storage/emulated/0/");
-        else tree = tree.replaceFirst(File.pathSeparator, File.separator);
-        if (oldPath.contains(tree)) {
-            final String s = oldPath.substring(oldPath.indexOf(tree) + tree.length());
-            if (tree.contains("/storage/emulated/0/")) tree = tree.replaceFirst("/storage/emulated/0/", "primary:");
-            else tree = tree.replaceFirst(File.separator, File.pathSeparator);
-            return tree + s;
+        final StorageTree tree;
+        final String documentId;
+        if (filename.contains(File.pathSeparator)) { // ":" means it is already a document id
+            tree = index.owningDocumentId(filename);
+            documentId = filename;
+        } else {
+            tree = index.containing(filename);
+            documentId = tree == null ? null : tree.documentIdFor(filename);
         }
-        return null;
+        if (tree == null || documentId == null) return null;
+
+        final Uri treeUri = AllowedFolders.uriFor(tree);
+        if (treeUri == null) return null;
+        return getDocumentFileFromUri(
+                DocumentsContract.buildDocumentUriUsingTree(treeUri, documentId));
     }
 
     /*
@@ -996,6 +877,7 @@ public abstract class FileUtil {
         public boolean exists() {
             Object ob = getOb();
             if (ob == null) return false;
+            if (ob instanceof VirtualDir) return true;
             if (ob instanceof DocumentFile) return ((DocumentFile) getOb()).exists();
             else return ((File) ob).exists();
         }
@@ -1003,6 +885,7 @@ public abstract class FileUtil {
         public String getName() {
             Object ob = getOb();
             if (ob == null) return "";
+            if (ob instanceof VirtualDir) return ((VirtualDir) ob).getName();
             if (ob instanceof DocumentFile) return ((DocumentFile) getOb()).getName();
             else return ((File) ob).getName();
         }
@@ -1010,6 +893,7 @@ public abstract class FileUtil {
         public boolean isDirectory() {
             Object ob = getOb();
             if (ob == null) return false;
+            if (ob instanceof VirtualDir) return true;
             if (ob instanceof DocumentFile) return ((DocumentFile) getOb()).isDirectory();
             else return ((File) ob).isDirectory();
         }
@@ -1017,6 +901,7 @@ public abstract class FileUtil {
         public long length() {
             Object ob = getOb();
             if (ob == null) return 0;
+            if (ob instanceof VirtualDir) return 0;
             if (ob instanceof DocumentFile) return ((DocumentFile) getOb()).length();
             else return ((File) ob).length();
         }
@@ -1024,6 +909,7 @@ public abstract class FileUtil {
         public long lastModified() {
             Object ob = getOb();
             if (ob == null) return 0;
+            if (ob instanceof VirtualDir) return ((VirtualDir) ob).getLastModified();
             if (ob instanceof DocumentFile) return ((DocumentFile) getOb()).lastModified();
             else return ((File) ob).lastModified();
         }
@@ -1031,6 +917,7 @@ public abstract class FileUtil {
         public boolean isFile() {
             Object ob = getOb();
             if (ob == null) return false;
+            if (ob instanceof VirtualDir) return false;
             if (ob instanceof DocumentFile) return ((DocumentFile) getOb()).isFile();
             else return ((File) ob).isFile();
         }
@@ -1038,6 +925,7 @@ public abstract class FileUtil {
         public boolean canRead() {
             Object ob = getOb();
             if (ob == null) return false;
+            if (ob instanceof VirtualDir) return true;
             if (ob instanceof DocumentFile) return ((DocumentFile) getOb()).canRead();
             else return ((File) ob).canRead();
         }
@@ -1045,6 +933,9 @@ public abstract class FileUtil {
         public boolean canWrite() {
             Object ob = getOb();
             if (ob == null) return false;
+            // Never writable: a virtual directory has no provider behind it, so MKD and STOR
+            // there have to be refused rather than half succeed on the File path.
+            if (ob instanceof VirtualDir) return false;
             if (ob instanceof DocumentFile) return ((DocumentFile) getOb()).canWrite();
             else return ((File) ob).canWrite();
         }
@@ -1052,6 +943,7 @@ public abstract class FileUtil {
         public String getCanonicalPath() throws IOException {
             Object ob = getOb();
             if (ob == null) return "";
+            if (ob instanceof VirtualDir) return ((VirtualDir) ob).getPath();
             if (ob instanceof DocumentFile) return ((DocumentFile) getOb()).getUri().getPath();
             else return ((File) ob).getCanonicalPath();
         }
@@ -1059,6 +951,7 @@ public abstract class FileUtil {
         public String getAbsolutePath() {
             Object ob = getOb();
             if (ob == null) return "";
+            if (ob instanceof VirtualDir) return ((VirtualDir) ob).getPath();
             if (ob instanceof DocumentFile) return ((DocumentFile) getOb()).getUri().getPath();
             else return ((File) ob).getAbsolutePath();
         }
@@ -1078,9 +971,20 @@ public abstract class FileUtil {
      * */
     public static Gen createGenFromFile(File f) {
         if (Util.useScopedStorage()) {
+            if (AllowedFolders.index().isVirtual(f.getPath())) {
+                return new Gen<>(new VirtualDir(f.getPath(), virtualDirTime(f)));
+            }
             return FileUtil.convertDocumentFileToGen(FileUtil.getDocumentFileFromFileScopedStorage(f));
         } else {
             return FileUtil.convertFileToGen(f);
         }
+    }
+
+    /*
+     * A virtual directory has no real modification time.
+     */
+    private static long virtualDirTime(File f) {
+        final long modified = f.lastModified();
+        return modified > 0 ? modified : System.currentTimeMillis(); // some clients refuse 0
     }
 }

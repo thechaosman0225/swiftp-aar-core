@@ -44,6 +44,10 @@ public class LocalDataSocket {
     private static final int SO_TIMEOUT_MS = 30000; // socket timeout millis
     public static final int TCP_CONNECTION_BACKLOG = 5;
 
+    // Bounds for passive port range. Below 1024 we would need extra privileges
+    private static final int FIRST_UNPRIVILEGED_PORT = 1024;
+    private static final int LAST_PORT = 65535;
+
     // Listener socket used for PASV mode
     ServerSocket server = null;
     SSLServerSocket sslServer = null;
@@ -63,8 +67,13 @@ public class LocalDataSocket {
     /**
      * Clears the state of this object, as if no pasv() or port() had occurred. All
      * sockets are closed.
+     *
+     * A transfer clears the state itself, so the only caller that matters from
+     * outside is the end of the session: a client that asks for a passive port and
+     * then leaves without using it would otherwise keep that port bound for as long
+     * as the process lives.
      */
-    private void clearState() {
+    public void clearState() {
         if (server != null) {
             try {
                 server.close();
@@ -136,15 +145,33 @@ public class LocalDataSocket {
         return onEpsvPlain(address);
     }
 
+    /**
+     * Picks the local port to listen on for a passive mode data connection.
+     *
+     * A field left at 0 means "not configured":, which asks the system for any
+     * free port. Only the low field set means there is no upper bound, only the
+     * high field set means no lower bound and low equal to high pins that single
+     * port.
+     *
+     * @return the port to bind, or 0 to let the system choose.
+     */
     public static int getNewPort() {
-        int newPort = 0;
-        final int portRangeLow = FsSettings.getPortRangeLow();
-        final int portRangeHigh = FsSettings.getPortRangeHigh();
-        if (portRangeLow != 0 || portRangeHigh != 0) {
-            int i = new Random().nextInt(portRangeHigh - portRangeLow);
-            newPort = portRangeLow + i;
+        int low = FsSettings.getPortRangeLow();
+        int high = FsSettings.getPortRangeHigh();
+        if (low <= 0 && high <= 0) {
+            return 0;
         }
-        return newPort;
+        if (low <= 0) low = FIRST_UNPRIVILEGED_PORT;
+        if (high <= 0) high = LAST_PORT;
+        if (low > LAST_PORT) low = LAST_PORT;
+        if (high > LAST_PORT) high = LAST_PORT;
+        if (low > high) { // hmmm, wrong order
+            int swap = low;
+            low = high;
+            high = swap;
+        }
+        // low == high would otherwise give 0 and nextInt(0) throws
+        return low + new Random().nextInt(high - low + 1);
     }
 
     public boolean onPort(InetAddress remoteAddress, int remotePort) {
