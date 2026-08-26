@@ -33,12 +33,12 @@ import java.net.Inet6Address;
 import java.net.InetAddress;
 import java.net.Socket;
 import java.nio.ByteBuffer;
+import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 
 import javax.net.ssl.SSLSocket;
 
 import be.ppareit.swiftp.App;
-import be.ppareit.swiftp.BuildConfig;
 import be.ppareit.swiftp.FsService;
 import be.ppareit.swiftp.FsSettings;
 import be.ppareit.swiftp.Util;
@@ -62,7 +62,6 @@ public class SessionThread extends Thread {
     private boolean userAuthenticated = false;
     private File workingDir = FsSettings.getDefaultChrootDir();
     private File chrootDir = workingDir;
-    private static ConcurrentHashMap<String, String> uriString = null; // scoped match user to perm
     private Socket dataSocket = null; // PASV plain data socket
     private SSLSocket sslDataSocket = null; // PASV secure data socket
     private File renameFrom = null;
@@ -80,8 +79,9 @@ public class SessionThread extends Thread {
     private String hashingAlgorithm = "SHA-1";
     private final Logging logging = new Logging();
     private boolean pbszEnabled = false;
-    private boolean epsvEnabled = false;
-    private boolean eprtEnabled = false;
+    // Set by EPSV ALL only. RFC 2428 s4: once a client has said EPSV ALL, the
+    // server must refuse every other way of setting up a data connection
+    private boolean epsvAllRequested = false;
 
     public SessionThread(Socket socket, LocalDataSocket dataSocket, SSLSocket sslSocket) {
         cmdSocket = socket;
@@ -346,16 +346,10 @@ public class SessionThread extends Thread {
     /**
      * Sanitize the logged commands so we don't leak username or password.
      */
-    private String sanitizeCommand(String cmd) {
-        // Don't sanitize in debug build
-        if (BuildConfig.DEBUG) {
-            return cmd;
-        }
-        // Running in release
-        if (cmd.trim().startsWith("PASS")) {
-            return "PASS [hidden]";
-        } else if (cmd.trim().startsWith("USER")) {
-            return "USER [hidden]";
+    static String sanitizeCommand(String cmd) {
+        final String verb = cmd.trim().split(" ")[0].toUpperCase();
+        if (verb.equals("PASS") || verb.equals("USER")) {
+            return verb + " [hidden]";
         }
         return cmd;
     }
@@ -380,12 +374,12 @@ public class SessionThread extends Thread {
             if (cmdSSLSocket != null) reader = new InputStreamReader(cmdSSLSocket.getInputStream());
             else reader = new InputStreamReader(cmdSocket.getInputStream());
             final BufferedReader in = new BufferedReader(reader, 8192); // use 8k buffer
-            final String ftps = "[ FTPS ] ";
             while (true) {
                 String line;
+                final String prefix; // only in log
                 if (cmdSSLSocket != null) {
                     line = in.readLine();
-                    logging.appendLog(ftps + line);
+                    prefix = "[ FTPS ] ";
                 } else if (cmdSSLAuthSocket != null) {
                     if (readerSSL == null) {
                         logging.appendLog("readerSSL is null *****");
@@ -393,14 +387,15 @@ public class SessionThread extends Thread {
                         inSSL = new BufferedReader(readerSSL, 8192); // use 8k buffer
                     }
                     line = inSSL.readLine();
-                    logging.appendLog(ftps + line);
+                    prefix = "[ FTPS ] ";
                 } else {
                     line = in.readLine(); // will accept \r\n or \n for terminator
-                    logging.appendLog(line);
+                    prefix = "[ FTP ] ";
                 }
                 if (line != null) {
-                    logging.appendLog(sanitizeCommand(line));
-                    Cat.d("Received line from client: " + sanitizeCommand(line));
+                    final String logLine = prefix + sanitizeCommand(line);
+                    logging.appendLog(logLine);
+                    Cat.d("Received line from client: " + logLine);
                     FtpCmd.dispatchCommand(this, line);
                 } else {
                     logging.appendLog("quitting...");
@@ -413,6 +408,11 @@ public class SessionThread extends Thread {
             Cat.i("Connection was dropped");
         }
         closeSocket();
+        // The listener a PASV or EPSV bound is released by the transfer that uses it,
+        // or by the next data setup command. A session that ends between those two
+        // leaves it bound, and with a port range configured the server runs out of
+        // ports after a handful of connections and answers 502 to every PASV.
+        localDataSocket.clearState();
         AnonymousLimit.decrement();
         FsService.connWakelockEndHandler();
     }
@@ -623,22 +623,6 @@ public class SessionThread extends Thread {
         }
     }
 
-    public static String getUriString(String threadName) {
-        if (uriString == null) return "";
-        if (uriString.containsKey(threadName)) return uriString.get(threadName);
-        return "";
-    }
-
-    public static void putUriString(String threadName, String s) {
-        if (uriString == null) uriString = new ConcurrentHashMap<>();
-        uriString.put(threadName, s);
-    }
-
-    public static void removeUriString(String threadName) {
-        if (uriString == null) return;
-        uriString.remove(threadName);
-    }
-
     public boolean isPbszEnabled() {
         return pbszEnabled;
     }
@@ -647,20 +631,12 @@ public class SessionThread extends Thread {
         this.pbszEnabled = pbszEnabled;
     }
 
-    public boolean isEpsvEnabled() {
-        return epsvEnabled;
+    public boolean isEpsvAllRequested() {
+        return epsvAllRequested;
     }
 
-    public void setEpsvEnabled(boolean epsvEnabled) {
-        this.epsvEnabled = epsvEnabled;
-    }
-
-    public boolean isEprtEnabled() {
-        return eprtEnabled;
-    }
-
-    public void setEprtEnabled(boolean eprtEnabled) {
-        this.eprtEnabled = eprtEnabled;
+    public void setEpsvAllRequested(boolean epsvAllRequested) {
+        this.epsvAllRequested = epsvAllRequested;
     }
 
     public String makeSelectedTypesResponse(FileUtil.Gen gen) {

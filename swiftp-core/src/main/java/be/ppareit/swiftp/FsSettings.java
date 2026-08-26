@@ -37,9 +37,11 @@ import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 import be.ppareit.swiftp.server.FtpUser;
+import be.ppareit.swiftp.utils.AllowedFolders;
 import be.ppareit.swiftp.utils.FileUtil;
 
 public class FsSettings {
@@ -74,7 +76,7 @@ public class FsSettings {
 
     public static FtpUser getUser(String username) {
         for (FtpUser user : getUsers()) {
-            if (user.getUsername().equals(username))
+            if (Objects.equals(user.getUsername(), username))
                 return user;
         }
         return null;
@@ -95,33 +97,12 @@ public class FsSettings {
         List<FtpUser> users = getUsers();
         ArrayList<FtpUser> found = new ArrayList<>();
         for (FtpUser user : users) {
-            if (user.getUsername().equals(username)) {
+            if (Objects.equals(user.getUsername(), username)) {
                 found.add(user);
             }
         }
         users.removeAll(found);
-        if (actualDelete /*Don't do this on modify.*/) {
-            for (FtpUser user : found) {
-                removeUserUriPerm(user);
-            }
-        }
         sp.edit().putString("users", gson.toJson(users)).apply();
-    }
-
-    private static void removeUserUriPerm(FtpUser user) {
-        final String userUriString = user.getUriString();
-        if (userUriString == null || userUriString.isEmpty()) return;
-        List<UriPermission> list = App.getAppContext().getContentResolver().getPersistedUriPermissions();
-        for (UriPermission uriToRemove : list) {
-            if (uriToRemove == null) continue;
-            final String s = uriToRemove.getUri().getPath();
-            if (s == null) continue;
-            if (s.equals(userUriString)) {
-                App.getAppContext().getContentResolver().releasePersistableUriPermission(uriToRemove.getUri(),
-                        Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-                break;
-            }
-        }
     }
 
     public static void modifyUser(String username, FtpUser newUser) {
@@ -133,32 +114,26 @@ public class FsSettings {
         return sp.getBoolean("allow_anonymous", false);
     }
 
+    public static void setAllowAnonymous(boolean allow) {
+        sp.edit().putBoolean("allow_anonymous", allow).apply();
+    }
+
+    /** The anonymous login has its own chroot, it is not one of the users. */
+    public static String getAnonChroot() {
+        return sp.getString("anonChroot", "/storage/emulated/0" /*backwards compat*/);
+    }
+
+    public static void setAnonChroot(String chroot) {
+        sp.edit().putString("anonChroot", chroot).apply();
+    }
+
     public static File getDefaultChrootDir() {
-        // Get the path from the app's MANAGE USERS chroot folder UI text field that the user will use during setup.
-        String subFix = null;
         if (Util.useScopedStorage()) {
-            // The app's MANAGE USERS chroot folder UI selection cannot select the sd card at least on Android 11+.
-            //  The picker does all that's needed there so that use should be switched with ADVANCED SETTINGS >
-            //  WRITE EXTERNAL picker or just make it invisible when on A11+ ? Could also just pull open the same
-            //  picker on both with A11+ or something else. It also presents possible conflicts with the Uri path
-            //  eg "/storage/sd card/" verses "/sd card/Test/".
-            String s = FileUtil.cleanupUriStoragePath(FileUtil.getTreeUri());
-            if (s != null && !s.contains("primary:")) {
-                final String chroot = FileUtil.getSdCardBaseFolderScopedStorage();
-                // Need to return eg "/storage" for sd card and "/storage/emulated/0" for internal.
-                if (chroot != null && !chroot.isEmpty()) return new File(chroot);
-                // otherwise just get the other path from below.
-            } else if (s != null && s.contains("primary:")) {
-                // Fix for issue seen on Android 8.0:
-                // Had to implement over below as the below chroot is forced to
-                // getExternalStorageDirectory() when actual chroot may include further sub dirs.
-                subFix = s.replace("primary:", "");
-                // At the moment, have to do it below, as a StackOverflow is happening on the test device
-                // here with any additional code for an unknown reason.
-            }
+            final String chroot = AllowedFolders.index().defaultChroot();
+            if (chroot != null && !chroot.isEmpty()) return new File(chroot);
+            // Nothing granted yet. Fall through, so the UI still shows a sensible path.
         }
 
-        // Original below incorrectly returns "/storage/emulated/0" for sd card with Android 11+
         File chrootDir;
         if (Environment.getExternalStorageState().equals(Environment.MEDIA_MOUNTED)) {
             chrootDir = Environment.getExternalStorageDirectory();
@@ -172,7 +147,6 @@ public class FsSettings {
             // but this will probably not be what the user wants
             return App.getAppContext().getFilesDir();
         }
-        if (subFix != null) return new File(chrootDir, subFix);
         return chrootDir;
     }
 
@@ -206,36 +180,18 @@ public class FsSettings {
 
     public static int getAnonMaxConNumber() {
         String s = sp.getString("anon_max", "1");
+        if (s.isEmpty()) s = "1";
         int i = Integer.parseInt(s);
         Log.v(TAG, "Using anon max connections: " + i);
         return i;
     }
 
+    public static void setAnonMaxConNumber(int max) {
+        sp.edit().putString("anon_max", String.valueOf(max)).apply();
+    }
+
     public static boolean shouldTakeFullWakeLock() {
         return sp.getBoolean("stayAwake", false);
-    }
-
-    public static int getTheme() {
-        String theme = sp.getString("theme", "0");
-        if (theme == null) {
-            return R.style.AppThemeDark;
-        }
-
-        switch (theme) {
-            case "0":
-                return R.style.AppThemeDark;
-            case "1":
-                return R.style.AppThemeLight;
-            case "2":
-                return R.style.AppThemeLight_DarkActionBar;
-            default:
-                return R.style.AppThemeDark;
-        }
-
-    }
-
-    public static boolean showNotificationIcon() {
-        return sp.getBoolean("show_notification_icon_preference", true);
     }
 
     /**
@@ -284,13 +240,6 @@ public class FsSettings {
     }
 
     /*
-     * Returns whether the client early 150 workaround is enabled or not.
-     * */
-    public static boolean isEarly150Enabled() {
-        return sp.getBoolean("early150Response", false);
-    }
-
-    /*
      * Returns whether the FTPS implicit port is enabled or not.
      * */
     public static boolean isFeatDisabled() {
@@ -308,7 +257,7 @@ public class FsSettings {
      * Returns the data connection range low port;
      * */
     public static int getPortRangeLow() {
-        return Integer.parseInt(getPortRangeLowString());
+        return parseRangePort(getPortRangeLowString());
     }
 
     /*
@@ -323,7 +272,17 @@ public class FsSettings {
      * Returns the data connection range high port;
      * */
     public static int getPortRangeHigh() {
-        return Integer.parseInt(getPortRangeHighString());
+        return parseRangePort(getPortRangeHighString());
+    }
+
+    private static int parseRangePort(String value) {
+        // null when preference screen is empty
+        if (value == null) return 0;
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     /*

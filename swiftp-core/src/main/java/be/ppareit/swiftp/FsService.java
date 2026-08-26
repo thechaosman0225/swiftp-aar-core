@@ -20,11 +20,8 @@ along with SwiFTP.  If not, see <http://www.gnu.org/licenses/>.
 
 package be.ppareit.swiftp;
 
-import android.Manifest;
 import android.app.AlarmManager;
-import android.app.Notification;
-import android.app.NotificationChannel;
-import android.app.NotificationManager;
+import android.app.ForegroundServiceStartNotAllowedException;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
@@ -32,6 +29,9 @@ import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.content.SharedPreferences;
 import android.net.ConnectivityManager;
+import android.net.LinkProperties;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.NetworkInfo;
 import android.net.wifi.WifiManager;
 import android.net.wifi.WifiManager.WifiLock;
@@ -48,9 +48,7 @@ import android.util.Log;
 import android.view.Gravity;
 import android.widget.Toast;
 
-import androidx.annotation.RequiresPermission;
 import androidx.core.content.ContextCompat;
-import androidx.core.app.NotificationCompat;
 
 import net.vrallev.android.cat.Cat;
 
@@ -68,30 +66,12 @@ import java.util.List;
 
 import javax.net.ssl.SSLServerSocket;
 
-
+import be.ppareit.swiftp.gui.FsNotification;
 import be.ppareit.swiftp.server.SessionThread;
 import be.ppareit.swiftp.server.TcpListener;
 import be.ppareit.swiftp.utils.FTPSSockets;
 
 public class FsService extends Service implements Runnable {
-    private static final int NOTIFICATION_ID = 1;
-    private static final String CHANNEL_ID = "swiftp_channel";
-
-    private Notification buildNotification() {
-        NotificationManager nm = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
-        if (Build.VERSION.SDK_INT >= 26) {
-            NotificationChannel channel = new NotificationChannel(
-                    CHANNEL_ID, "SwiFTP", NotificationManager.IMPORTANCE_LOW);
-            nm.createNotificationChannel(channel);
-        }
-        return new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setContentTitle("SwiFTP")
-                .setContentText("FTP server running")
-                .setSmallIcon(android.R.drawable.ic_menu_upload) // swap for your own icon
-                .setOngoing(true)
-                .build();
-    }
-
     private static final String TAG = FsService.class.getSimpleName();
 
     // Service will check following actions when started through intent
@@ -147,7 +127,16 @@ public class FsService extends Service implements Runnable {
         Context context = App.getAppContext();
         Intent serviceIntent = new Intent(context, FsService.class);
         if (!FsService.isRunning()) {
-            ContextCompat.startForegroundService(context, serviceIntent);
+
+            if (Build.VERSION.SDK_INT >= 31) {
+                try {
+                    ContextCompat.startForegroundService(context, serviceIntent);
+                } catch (ForegroundServiceStartNotAllowedException e) {
+                    Log.e(TAG, "Not allowed to start the server in the foreground", e);
+                }
+            } else {
+                ContextCompat.startForegroundService(context, serviceIntent);
+            }
         }
     }
 
@@ -188,9 +177,9 @@ public class FsService extends Service implements Runnable {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         if (Build.VERSION.SDK_INT >= 34) {
-            startForeground(NOTIFICATION_ID, buildNotification(), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
+            startForeground(FsNotification.NOTIFICATION_ID, FsNotification.setupNotification(getApplicationContext()), ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE);
         } else {
-            startForeground(NOTIFICATION_ID, buildNotification());
+            startForeground(FsNotification.NOTIFICATION_ID, FsNotification.setupNotification(getApplicationContext()));
         }
 
         //https://developer.android.com/reference/android/app/Service.html
@@ -280,16 +269,28 @@ public class FsService extends Service implements Runnable {
         Log.d(TAG, "Exiting cleanly, returning from run()");
 
         stopSelf();
-        sendBroadcast(new Intent(ACTION_STOPPED));
+        broadcastAction(ACTION_STOPPED);
+    }
+
+    private void broadcastAction(String action) {
+        // need setPackage for our RECEIVER_NOT_EXPORTED calls
+        sendBroadcast(new Intent(action).setPackage(getPackageName()));
     }
 
     // This opens a listening socket on all interfaces.
     void setupListener() throws IOException {
         initServerSocket();
+        // Without this the FTPS setup runs on every start, fails for want of a
+        // certificate nobody configured, and reports it as a caught exception.
+        if (!FsSettings.isImplicitUsed()) return;
         try {
             listenSocketSecure = new FTPSSockets().initServerSocket();
-        } catch (Exception e) {
-            Log.e(TAG, "Unable to open FTPS implicit port, bailing out: " + e.getLocalizedMessage());
+        } catch (IOException e) {
+            // Expected when FTPS is on but the certificate is missing or unusable.
+            Log.e(TAG, "Unable to open FTPS implicit port: " + e.getMessage());
+        } catch (RuntimeException e) {
+            // Not expected. Plain FTP still comes up, but say so plainly.
+            Log.e(TAG, "Unexpected failure opening the FTPS implicit port", e);
         }
     }
 
@@ -297,9 +298,9 @@ public class FsService extends Service implements Runnable {
         listenSocket = new ServerSocket();
         listenSocket.setReuseAddress(true);
         listenSocket.bind(new InetSocketAddress(FsSettings.getPortNumber()));
+        Log.i(TAG, "FTP listener bound to " + listenSocket.getLocalSocketAddress());
     }
 
-    @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
     @Override
     public void run() {
         Log.d(TAG, "Server thread running");
@@ -307,9 +308,11 @@ public class FsService extends Service implements Runnable {
         if (!isConnectedToLocalNetwork()) {
             Log.w(TAG, "run: There is no local network, bailing out");
             stopSelf();
-            sendBroadcast(new Intent(ACTION_FAILEDTOSTART));
+            broadcastAction(ACTION_FAILEDTOSTART);
             return;
         }
+
+        logNetworkConfiguration();
 
         // Initialization of wifi, set up the socket
         try {
@@ -317,7 +320,7 @@ public class FsService extends Service implements Runnable {
         } catch (IOException e) {
             Log.w(TAG, "run: Unable to open port, bailing out.");
             stopSelf();
-            sendBroadcast(new Intent(ACTION_FAILEDTOSTART));
+            broadcastAction(ACTION_FAILEDTOSTART);
             return;
         }
 
@@ -337,7 +340,7 @@ public class FsService extends Service implements Runnable {
 
         // A socket is open now, so the FTP server is started, notify rest of world
         Log.i(TAG, "Ftp Server up and running, broadcasting ACTION_STARTED");
-        sendBroadcast(new Intent(ACTION_STARTED));
+        broadcastAction(ACTION_STARTED);
 
         socketWatcher = new TcpListener(listenSocket, this, listenSocketSecure);
         socketWatcher.start();
@@ -463,7 +466,6 @@ public class FsService extends Service implements Runnable {
      *
      * @return local ip address or null if not found
      */
-    @RequiresPermission(android.Manifest.permission.ACCESS_NETWORK_STATE)
     public static InetAddress getLocalInetAddress() {
         InetAddress returnAddress = null;
         if (!isConnectedToLocalNetwork()) {
@@ -494,16 +496,52 @@ public class FsService extends Service implements Runnable {
         return returnAddress;
     }
 
+    private static void logNetworkConfiguration() {
+        Context context = App.getAppContext();
+        ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+        Network activeNetwork = cm.getActiveNetwork();
+        NetworkCapabilities capabilities = activeNetwork == null ? null : cm.getNetworkCapabilities(activeNetwork);
+        LinkProperties linkProperties = activeNetwork == null ? null : cm.getLinkProperties(activeNetwork);
+
+        Log.i(TAG, "Active network=" + activeNetwork
+                + ", capabilities=" + capabilities
+                + ", linkProperties=" + linkProperties);
+
+        try {
+            for (NetworkInterface networkInterface
+                    : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+                Log.i(TAG, "Interface " + networkInterface.getName()
+                        + ": displayName=" + networkInterface.getDisplayName()
+                        + ", up=" + networkInterface.isUp()
+                        + ", loopback=" + networkInterface.isLoopback()
+                        + ", virtual=" + networkInterface.isVirtual()
+                        + ", multicast=" + networkInterface.supportsMulticast());
+                for (InetAddress address
+                        : Collections.list(networkInterface.getInetAddresses())) {
+                    Log.i(TAG, "Interface " + networkInterface.getName()
+                            + " address=" + address.getHostAddress()
+                            + ", siteLocal=" + address.isSiteLocalAddress()
+                            + ", linkLocal=" + address.isLinkLocalAddress()
+                            + ", loopback=" + address.isLoopbackAddress());
+                }
+            }
+        } catch (SocketException e) {
+            Log.w(TAG, "Unable to enumerate network interfaces", e);
+        }
+
+        InetAddress selectedAddress = getLocalInetAddress();
+        Log.i(TAG, "Selected local FTP address="
+                + (selectedAddress == null ? "none" : selectedAddress.getHostAddress()));
+    }
+
     /**
      * Checks to see if we are connected to a local network, for instance wifi or ethernet
      *
      * @return true if connected to a local network
      */
-    @RequiresPermission(android.Manifest.permission.ACCESS_NETWORK_STATE)
     public static boolean isConnectedToLocalNetwork() {
         boolean connected = false;
         Context context = App.getAppContext();
-        if (context == null) return true;
         ConnectivityManager cm = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
         NetworkInfo ni = cm.getActiveNetworkInfo();
         connected = ni != null && ni.isConnected();
@@ -561,12 +599,6 @@ public class FsService extends Service implements Runnable {
                 }
             }
             for (SessionThread removeThread : toBeRemoved) {
-                if (Util.useScopedStorage()) {
-                    // Clean up for scoped multi user
-                    if (SessionThread.getUriString(removeThread.getName()) != null) {
-                        SessionThread.removeUriString(removeThread.getName());
-                    }
-                }
                 sessionThreads.remove(removeThread);
             }
 
@@ -588,7 +620,8 @@ public class FsService extends Service implements Runnable {
         Intent restartService = new Intent(getApplicationContext(), this.getClass());
         restartService.setPackage(getPackageName());
         PendingIntent restartServicePI = PendingIntent.getService(
-                getApplicationContext(), 1, restartService, PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_IMMUTABLE);
+                getApplicationContext(), 1, restartService,
+                PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_IMMUTABLE);
         AlarmManager alarmService = (AlarmManager) getApplicationContext()
                 .getSystemService(Context.ALARM_SERVICE);
         alarmService.set(AlarmManager.ELAPSED_REALTIME,

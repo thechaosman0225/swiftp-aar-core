@@ -32,7 +32,6 @@ import java.io.IOException;
 import java.io.InputStream;
 
 import be.ppareit.swiftp.App;
-import be.ppareit.swiftp.FsSettings;
 import be.ppareit.swiftp.Util;
 import be.ppareit.swiftp.utils.FileUtil;
 
@@ -74,7 +73,8 @@ public class CmdRETR extends FtpCmd implements Runnable {
             FileUtil.Gen gen;
             if (docFileToRetr != null) gen = FileUtil.convertDocumentFileToGen(docFileToRetr);
             else gen = FileUtil.convertFileToGen(fileToRetr);
-            if (validate(gen, param) != null) break mainblock;
+            errString = validate(gen, param);
+            if (errString != null) break mainblock;
 
             FileInputStream in = null;
             InputStream is = null;
@@ -88,7 +88,11 @@ public class CmdRETR extends FtpCmd implements Runnable {
                 }
                 byte[] buffer = new byte[SessionThread.DATA_CHUNK_SIZE];
                 int bytesRead;
-                if (FsSettings.isEarly150Enabled()) sessionThread.writeString("150 Sending file\r\n");
+                // The 150 goes out before the data socket is opened, because opening it
+                // is what the client is waiting for the 150 to tell it to do. Under PROT P
+                // the server would otherwise block on a ClientHello, the client will not
+                // send until it has read this reply, and the transfer deadlocks!
+                sessionThread.writeString("150 Sending file\r\n");
                 if (sessionThread.openDataSocket()) {
                     Cat.d("RETR opened data socket");
                 } else {
@@ -96,7 +100,6 @@ public class CmdRETR extends FtpCmd implements Runnable {
                     Cat.i("Error in initDataSocket()");
                     break mainblock;
                 }
-                if (!FsSettings.isEarly150Enabled()) sessionThread.writeString("150 Sending file\r\n");
                 if (sessionThread.isBinaryMode()) { // RANG is supported only in binary mode.
                     Cat.d("Transferring in binary mode");
                     long offset = 0L;
@@ -111,13 +114,15 @@ public class CmdRETR extends FtpCmd implements Runnable {
                     }
                     // This is not a range but length (Range 0-0 would still read 0th byte), so +1
                     long bytesToRead = endPosition - offset + 1;
-                    if (Util.useScopedStorage()) is.skip(offset);
-                    else in.skip(offset);
+                    if (Util.useScopedStorage()) skipFully(is, offset);
+                    else skipFully(in, offset);
                     final boolean scoped = Util.useScopedStorage();
-                    while ((bytesRead = (scoped ? is.read(buffer) : in.read(buffer))) != -1) {
+                    while (bytesToRead > 0
+                            && (bytesRead = (scoped ? is.read(buffer) : in.read(buffer))) != -1) {
                         boolean success;
                         if (bytesRead > bytesToRead) {
                             success = sessionThread.sendViaDataSocket(buffer, 0, (int) bytesToRead);
+                            bytesToRead = 0;
                         } else {
                             success = sessionThread.sendViaDataSocket(buffer, 0, bytesRead);
                             bytesToRead -= bytesRead;
@@ -196,6 +201,28 @@ public class CmdRETR extends FtpCmd implements Runnable {
             sessionThread.writeString("226 Transmission finished\r\n");
         }
         Cat.d("RETR done");
+    }
+
+    /**
+     * Skips exactly offset bytes, or stops at end of file.
+     *
+     * A single skip() is allowed to move less than asked, which would leave the stream
+     * short of the offset and send the client the wrong bytes with nothing reporting an
+     * error. That is likelier on the content:// stream than on a plain file.
+     * skipNBytes would say this in one line, but it needs API 34 and minSdk is 23.
+     */
+    private static void skipFully(InputStream stream, long offset) throws IOException {
+        long remaining = offset;
+        while (remaining > 0) {
+            long skipped = stream.skip(remaining);
+            if (skipped > 0) {
+                remaining -= skipped;
+            } else if (stream.read() == -1) {
+                break; // end of file, nothing left to skip past
+            } else {
+                remaining--; // skip may return 0; the read above advanced one byte
+            }
+        }
     }
 
     private String validate(FileUtil.Gen fileToRetr, String param) {
