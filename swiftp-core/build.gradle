@@ -1,12 +1,9 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-
 apply plugin: 'com.android.library'
 apply plugin: 'org.jetbrains.kotlin.android'
-
 android {
 	namespace 'be.ppareit.swiftp'
     compileSdk 36
-
     defaultConfig {
         minSdk 23
         targetSdk 36
@@ -21,14 +18,11 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-
             consumerProguardFiles "consumer-rules.pro"
-
             proguardFiles getDefaultProguardFile(
                     "proguard-android-optimize.txt"),
                     "proguard-rules.pro"
         }
-
         debug {
             minifyEnabled false
         }
@@ -38,15 +32,8 @@ android {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
-}
 
-kotlin {
-    compilerOptions {
-        jvmTarget = JvmTarget.JVM_17
-    }
-}
-
-packagingOptions {
+    packagingOptions {
         resources {
             excludes += [
                     "META-INF/DEPENDENCIES.txt",
@@ -62,13 +49,16 @@ packagingOptions {
             ]
         }
     }
-
     lint {
         disable += "GoogleAppIndexingWarning"
         disable += "MissingPermission"
     }
 }
-
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_17
+    }
+}
 dependencies {
 	implementation fileTree(dir: "libs", include: ["*.jar"])
 	
