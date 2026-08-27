@@ -5,18 +5,13 @@ package be.ppareit.swiftp.utils;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Context;
-import android.os.Environment;
-import android.widget.Toast;
 
 import androidx.annotation.Nullable;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
 import be.ppareit.swiftp.R;
-import be.ppareit.swiftp.Util;
-import be.ppareit.swiftp.gui.FolderPickerDialogBuilder;
 
 public class ChrootPicker {
 
@@ -35,38 +30,15 @@ public class ChrootPicker {
 
     private boolean isShowingFolderPicker = false;
 
+    /**
+     * Core is headless: the old raw-filesystem browser (FolderPickerDialogBuilder) was
+     * a gui-layer dialog and isn't included here. Under SAF, listFiles() on an arbitrary
+     * path returns null anyway, so browsing showed nothing useful even upstream. This
+     * always offers the granted folders and their root instead — the exact set of chroots
+     * that can actually work, scoped storage or not.
+     */
     public void showFolderPicker(String s, @Nullable Activity a, Context fragment /*Fragment use*/) {
-        if (Util.useScopedStorage()) {
-            // Under SAF listFiles() returns null, so browsing shows nothing. Offer the granted
-            // folders and their root instead, exactly the set of chroots that can work.
-            showAllowedFolderChoice(a != null ? a : fragment);
-            return;
-        }
-        if (isShowingFolderPicker)
-            return;
-        isShowingFolderPicker = true;
-        final File startDir;
-        if (s.isEmpty()) {
-            startDir = Environment.getExternalStorageDirectory();
-        } else {
-            startDir = new File(s);
-        }
-        AlertDialog folderPicker = new FolderPickerDialogBuilder(a != null ? a : fragment, startDir)
-                .setSelectedButton(R.string.select, path -> {
-                    final File root = new File(path);
-                    if (!root.canRead()) {
-                        showToast(R.string.notice_cant_read_write,
-                                a != null ? a : fragment);
-                    } else if (!root.canWrite()) {
-                        showToast(R.string.notice_cant_write,
-                                a != null ? a : fragment);
-                    }
-                    if (onTextEventListener != null) onTextEventListener.OnEvent(path);
-                })
-                .setNegativeButton(R.string.cancel, null)
-                .create();
-        folderPicker.setOnDismissListener(dialog -> isShowingFolderPicker = false);
-        folderPicker.show();
+        showAllowedFolderChoice(a != null ? a : fragment);
     }
 
     /**
@@ -101,6 +73,6 @@ public class ChrootPicker {
     }
 
     private void showToast(int errorResId, Context context) {
-        Toast.makeText(context, errorResId, Toast.LENGTH_LONG).show();
+        android.widget.Toast.makeText(context, errorResId, android.widget.Toast.LENGTH_LONG).show();
     }
 }
