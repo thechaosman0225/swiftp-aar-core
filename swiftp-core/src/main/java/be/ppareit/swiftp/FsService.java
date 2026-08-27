@@ -66,7 +66,6 @@ import java.util.List;
 
 import javax.net.ssl.SSLServerSocket;
 
-import be.ppareit.swiftp.gui.FsNotification;
 import be.ppareit.swiftp.server.SessionThread;
 import be.ppareit.swiftp.server.TcpListener;
 import be.ppareit.swiftp.utils.FTPSSockets;
