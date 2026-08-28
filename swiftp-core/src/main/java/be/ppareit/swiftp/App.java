@@ -29,9 +29,6 @@ import androidx.core.content.ContextCompat;
 
 import net.vrallev.android.cat.Cat;
 
-import be.ppareit.swiftp.gui.QuickToggleShortcut;
-import be.ppareit.swiftp.tasker.ServerStateBroadcastReceiver;
-
 public class App extends Application {
 
     private static App mInstance;
@@ -51,12 +48,8 @@ public class App extends Application {
         // stuck on ContextCompat till API >= 33 because RECEIVER_NOT_EXPORTED
         ContextCompat.registerReceiver(this, new NsdService.ServerActionsReceiver(),
                 intentFilter, ContextCompat.RECEIVER_NOT_EXPORTED);
-        ContextCompat.registerReceiver(this, new ServerStateBroadcastReceiver(),
-                intentFilter, ContextCompat.RECEIVER_NOT_EXPORTED);
-        ContextCompat.registerReceiver(this, new QuickToggleShortcut(),
-                intentFilter, ContextCompat.RECEIVER_NOT_EXPORTED);
-
-        QuickToggleShortcut.update(this, FsService.isRunning());
+        // deleted: ServerStateBroadcastReceiver registration (tasker integration, app-layer only)
+        // deleted: QuickToggleShortcut registration + update() call (Quick Settings tile, gui-layer only)
     }
 
     /**

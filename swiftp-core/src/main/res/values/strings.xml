@@ -10,4 +10,7 @@
     <string name="bs_low">Low</string>
     <string name="bs_high">High</string>
     <string name="bs_deep">Deep</string>
+<string name="cancel">Cancel</string>
+<string name="allowed_folders_title">Choose a folder</string>
+<string name="allowed_folders_none_chosen">No folders have been granted yet</string>
 </resources>
